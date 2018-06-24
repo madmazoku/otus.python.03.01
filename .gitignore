@@ -105,3 +105,6 @@ venv.bak/
 
 # homework materials
 material/
+
+# pycharm
+.idea/

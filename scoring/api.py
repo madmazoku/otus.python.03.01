@@ -10,6 +10,9 @@ import uuid
 from optparse import OptionParser
 from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
 
+import field
+import scoring
+
 SALT = "Otus"
 ADMIN_LOGIN = "admin"
 ADMIN_SALT = "42"
@@ -36,44 +39,14 @@ GENDERS = {
 }
 
 
-class CharField(object):
-    pass
-
-
-class ArgumentsField(object):
-    pass
-
-
-class EmailField(CharField):
-    pass
-
-
-class PhoneField(object):
-    pass
-
-
-class DateField(object):
-    pass
-
-
-class BirthDayField(object):
-    pass
-
-
-class GenderField(object):
-    pass
-
-
-class ClientIDsField(object):
-    pass
-
-
-class ClientsInterestsRequest(object):
+class ClientsInterestsRequest(FieldHolder):
     client_ids = ClientIDsField(required=True)
     date = DateField(required=False, nullable=True)
 
+    def __init__(self, arguments):
 
-class OnlineScoreRequest(object):
+
+class OnlineScoreRequest(FieldHolder):
     first_name = CharField(required=False, nullable=True)
     last_name = CharField(required=False, nullable=True)
     email = EmailField(required=False, nullable=True)
@@ -82,7 +55,7 @@ class OnlineScoreRequest(object):
     gender = GenderField(required=False, nullable=True)
 
 
-class MethodRequest(object):
+class MethodRequest(FieldHolder):
     account = CharField(required=False, nullable=True)
     login = CharField(required=True, nullable=True)
     token = CharField(required=True, nullable=True)
@@ -92,7 +65,6 @@ class MethodRequest(object):
     @property
     def is_admin(self):
         return self.login == ADMIN_LOGIN
-
 
 def check_auth(request):
     if request.is_admin:
@@ -105,7 +77,21 @@ def check_auth(request):
 
 
 def method_handler(request, ctx, store):
+    mr = MethodRequest(request['body'])
+
     response, code = None, None
+
+    if not check_auth(mr):
+        code = FORBIDDEN
+    elif mr.method == 'online_score':
+        osr = OnlineScoreRequest(mr.arguments)
+        scoring.get_score(osr.store, osr.phone, osr.email, birthday=osr.birthday, gender=osr.gender, first_name=osr.first_name, last_name=osr.last_name):
+    elif mr.method == 'clients_interests':
+        cir = ClientsInterestsRequest(mr.arguments)
+        scoring.get_interests(cir.store, cir.client_ids)
+    else:
+        code = INVALID_REQUEST
+
     return response, code
 
 
@@ -122,6 +108,7 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
         response, code = {}, OK
         context = {"request_id": self.get_request_id(self.headers)}
         request = None
+        data_string = None
         try:
             data_string = self.rfile.read(int(self.headers['Content-Length']))
             request = json.loads(data_string)
@@ -134,7 +121,7 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
             if path in self.router:
                 try:
                     response, code = self.router[path]({"body": request, "headers": self.headers}, context, self.store)
-                except Exception, e:
+                except Exception as e:
                     logging.exception("Unexpected error: %s" % e)
                     code = INTERNAL_ERROR
             else:
@@ -151,6 +138,7 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
         logging.info(context)
         self.wfile.write(json.dumps(r))
         return
+
 
 if __name__ == "__main__":
     op = OptionParser()

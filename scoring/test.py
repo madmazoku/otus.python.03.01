@@ -11,9 +11,11 @@ def cases(cases):
         @functools.wraps(f)
         def wrapper(*args):
             for c in cases:
-                new_args = args + (c if isinstance(c, tuple) else (c,))
+                new_args = args + (c if isinstance(c, tuple) else (c, ))
                 f(*new_args)
+
         return wrapper
+
     return decorator
 
 
@@ -67,8 +69,10 @@ class TestSuite(unittest.TestCase):
         {"phone": "79175002040", "email": "stupnikov@otus.ru", "gender": 1, "birthday": "01.01.1890"},
         {"phone": "79175002040", "email": "stupnikov@otus.ru", "gender": 1, "birthday": "XXX"},
         {"phone": "79175002040", "email": "stupnikov@otus.ru", "gender": 1, "birthday": "01.01.2000", "first_name": 1},
-        {"phone": "79175002040", "email": "stupnikov@otus.ru", "gender": 1, "birthday": "01.01.2000",
-         "first_name": "s", "last_name": 2},
+        {
+            "phone": "79175002040", "email": "stupnikov@otus.ru", "gender": 1, "birthday": "01.01.2000", "first_name":
+            "s", "last_name": 2
+        },
         {"phone": "79175002040", "birthday": "01.01.2000", "first_name": "s"},
         {"email": "stupnikov@otus.ru", "gender": 1, "last_name": 2},
     ])
@@ -86,8 +90,10 @@ class TestSuite(unittest.TestCase):
         {"gender": 0, "birthday": "01.01.2000"},
         {"gender": 2, "birthday": "01.01.2000"},
         {"first_name": "a", "last_name": "b"},
-        {"phone": "79175002040", "email": "stupnikov@otus.ru", "gender": 1, "birthday": "01.01.2000",
-         "first_name": "a", "last_name": "b"},
+        {
+            "phone": "79175002040", "email": "stupnikov@otus.ru", "gender": 1, "birthday": "01.01.2000", "first_name":
+            "a", "last_name": "b"
+        },
     ])
     def test_ok_score_request(self, arguments):
         request = {"account": "horns&hoofs", "login": "h&f", "method": "online_score", "arguments": arguments}
@@ -133,8 +139,8 @@ class TestSuite(unittest.TestCase):
         response, code = self.get_response(request)
         self.assertEqual(api.OK, code, arguments)
         self.assertEqual(len(arguments["client_ids"]), len(response))
-        self.assertTrue(all(v and isinstance(v, list) and all(isinstance(i, basestring) for i in v)
-                        for v in response.values()))
+        self.assertTrue(
+            all(v and isinstance(v, list) and all(isinstance(i, basestring) for i in v) for v in response.values()))
         self.assertEqual(self.context.get("nclients"), len(arguments["client_ids"]))
 
 

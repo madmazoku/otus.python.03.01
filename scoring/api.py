@@ -1,14 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import abc
 import json
 import datetime
 import logging
 import hashlib
 import uuid
 from optparse import OptionParser
-from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import field
 import scoring
@@ -39,32 +38,31 @@ GENDERS = {
 }
 
 
-class ClientsInterestsRequest(FieldHolder):
-    client_ids = ClientIDsField(required=True)
-    date = DateField(required=False, nullable=True)
-
-    def __init__(self, arguments):
+class ClientsInterestsRequest(field.FieldHolder):
+    client_ids = field.ClientIDsField(required=True)
+    date = field.DateField(required=False, nullable=True)
 
 
-class OnlineScoreRequest(FieldHolder):
-    first_name = CharField(required=False, nullable=True)
-    last_name = CharField(required=False, nullable=True)
-    email = EmailField(required=False, nullable=True)
-    phone = PhoneField(required=False, nullable=True)
-    birthday = BirthDayField(required=False, nullable=True)
-    gender = GenderField(required=False, nullable=True)
+class OnlineScoreRequest(field.FieldHolder):
+    first_name = field.CharField(required=False, nullable=True)
+    last_name = field.CharField(required=False, nullable=True)
+    email = field.EmailField(required=False, nullable=True)
+    phone = field.PhoneField(required=False, nullable=True)
+    birthday = field.BirthDayField(required=False, nullable=True)
+    gender = field.GenderField(required=False, nullable=True)
 
 
-class MethodRequest(FieldHolder):
-    account = CharField(required=False, nullable=True)
-    login = CharField(required=True, nullable=True)
-    token = CharField(required=True, nullable=True)
-    arguments = ArgumentsField(required=True, nullable=True)
-    method = CharField(required=True, nullable=False)
+class MethodRequest(field.FieldHolder):
+    account = field.CharField(required=False, nullable=True)
+    login = field.CharField(required=True, nullable=True)
+    token = field.CharField(required=True, nullable=True)
+    arguments = field.ArgumentsField(required=True, nullable=True)
+    method = field.CharField(required=True, nullable=False)
 
     @property
     def is_admin(self):
         return self.login == ADMIN_LOGIN
+
 
 def check_auth(request):
     if request.is_admin:
@@ -85,10 +83,17 @@ def method_handler(request, ctx, store):
         code = FORBIDDEN
     elif mr.method == 'online_score':
         osr = OnlineScoreRequest(mr.arguments)
-        scoring.get_score(osr.store, osr.phone, osr.email, birthday=osr.birthday, gender=osr.gender, first_name=osr.first_name, last_name=osr.last_name):
+        scoring.get_score(
+            store,
+            osr.phone,
+            osr.email,
+            birthday=osr.birthday,
+            gender=osr.gender,
+            first_name=osr.first_name,
+            last_name=osr.last_name)
     elif mr.method == 'clients_interests':
         cir = ClientsInterestsRequest(mr.arguments)
-        scoring.get_interests(cir.store, cir.client_ids)
+        scoring.get_interests(store, cir.client_ids)
     else:
         code = INVALID_REQUEST
 
@@ -96,9 +101,7 @@ def method_handler(request, ctx, store):
 
 
 class MainHTTPHandler(BaseHTTPRequestHandler):
-    router = {
-        "method": method_handler
-    }
+    router = {"method": method_handler}
     store = None
 
     def get_request_id(self, headers):
@@ -145,8 +148,11 @@ if __name__ == "__main__":
     op.add_option("-p", "--port", action="store", type=int, default=8080)
     op.add_option("-l", "--log", action="store", default=None)
     (opts, args) = op.parse_args()
-    logging.basicConfig(filename=opts.log, level=logging.INFO,
-                        format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d %H:%M:%S')
+    logging.basicConfig(
+        filename=opts.log,
+        level=logging.INFO,
+        format='[%(asctime)s] %(levelname).1s %(message)s',
+        datefmt='%Y.%m.%d %H:%M:%S')
     server = HTTPServer(("localhost", opts.port), MainHTTPHandler)
     logging.info("Starting server at %s" % opts.port)
     try:

@@ -146,27 +146,20 @@ method_router = {
 
 def method_handler(request, ctx, store):
     response, code = None, INVALID_REQUEST
-    try:
-        mr = MethodRequest(request['body'])
-        error_msg = mr.validate()
+    mr = MethodRequest(request['body'])
+    error_msg = mr.validate()
+    if len(error_msg) > 0:
+        response = '; '.join(error_msg)
+    elif not check_auth(mr):
+        code = FORBIDDEN
+    elif mr.method in method_router:
+        obj = method_router[mr.method]['object'](mr.arguments)
+        error_msg = obj.validate()
         if len(error_msg) > 0:
             response = '; '.join(error_msg)
-        elif not check_auth(mr):
-            code = FORBIDDEN
-        elif mr.method in method_router:
-            obj = method_router[mr.method]['object'](mr.arguments)
-            error_msg = obj.validate()
-            if len(error_msg) > 0:
-                response = '; '.join(error_msg)
-            else:
-                response = method_router[mr.method]['action'](ctx, store, mr, obj)
-                code = OK
-    except field.FieldError as e:
-        msg = 'FieldError: {!s}'.format(e)
-        response = msg
-    except field.FieldHolderError as e:
-        msg = 'FieldHolderError: {!s}'.format(e)
-        response = msg
+        else:
+            response = method_router[mr.method]['action'](ctx, store, mr, obj)
+            code = OK
     return response, code
 
 

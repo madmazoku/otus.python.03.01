@@ -74,6 +74,10 @@ class FieldHolderBase(object):
             print("{!s}: {!s} ({!s})".format(field_name, getattr(self, field_name), type(getattr(self, field_name))))
 
 
+class FieldHolder(FieldHolderBase, metaclass=FieldHolderMeta):
+    pass
+
+
 class CharField(Field):
     def validate(self, value):
         return super().validate(value) and (value is None or isinstance(value, str))
@@ -156,29 +160,3 @@ class ClientIDsField(Field):
 
     def validate(self, value):
         return super().validate(value) and (value is None or self.is_number_list(value))
-
-
-class FieldHolder(FieldHolderBase, metaclass=FieldHolderMeta):
-    pass
-
-
-if __name__ == '__main__':
-
-    class Struct(FieldHolder):
-        char = CharField()
-        arguments = ArgumentsField()
-        email = EmailField()
-        phone = PhoneField()
-        date = DateField()
-        birthday = BirthDayField()
-        gender = GenderField()
-        client_ids = ClientIDsField()
-
-    s = {
-        "char": "123", "arguments": {"a": 1, "b": 2, "c": 3}, "email": "aaa@gmail.com", "phone": "71234567890", "date":
-        "20.07.2017", "birthday": "20.07.1917", "gender": 1, "client_ids": [1, 2, 3, 4, 5, 1]
-    }
-
-    st = Struct(s)
-
-    st.dump_fields()

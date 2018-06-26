@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 import json
@@ -46,12 +46,6 @@ class ClientsInterestsRequest(field.FieldHolder):
     def nclients(self):
         return len(self.client_ids)
 
-    def interests(self, store):
-        interests_dict = {}
-        for client_id in self.client_ids:
-            interests_dict[client_id] = scoring.get_interests(store, client_id)
-        return interests_dict
-
     def validate(self):
         return (len(self.client_ids) > 0, 'empty client list')
 
@@ -74,20 +68,6 @@ class OnlineScoreRequest(field.FieldHolder):
                     has_dict[field_name] = field_value
             self._has = has_dict
         return self._has
-
-    def score(self, store, mr):
-        if mr.is_admin:
-            score = 42
-        else:
-            score = scoring.get_score(
-                store,
-                self.phone,
-                self.email,
-                birthday=self.birthday,
-                gender=self.gender,
-                first_name=self.first_name,
-                last_name=self.last_name)
-        return {'score': score}
 
     def validate(self):
         if self.phone is not None and self.email is not None:
@@ -122,6 +102,32 @@ def check_auth(request):
     return False
 
 
+def get_score(ctx, store, mr):
+    osr = OnlineScoreRequest(mr.arguments)
+    if mr.is_admin:
+        score = 42
+    else:
+        score = scoring.get_score(
+            store,
+            osr.phone,
+            osr.email,
+            birthday=osr.birthday,
+            gender=osr.gender,
+            first_name=osr.first_name,
+            last_name=osr.last_name)
+    ctx['has'] = osr.has
+    return {'score': score}
+
+
+def get_interests(ctx, store, mr):
+    cir = ClientsInterestsRequest(mr.arguments)
+    interests_dict = {}
+    for client_id in cir.client_ids:
+        interests_dict[client_id] = scoring.get_interests(store, client_id)
+        ctx['nclients'] = cir.nclients
+    return interests_dict
+
+
 def method_handler(request, ctx, store):
     response, code = None, INVALID_REQUEST
     try:
@@ -129,14 +135,10 @@ def method_handler(request, ctx, store):
         if not check_auth(mr):
             code = FORBIDDEN
         elif mr.method == 'online_score':
-            osr = OnlineScoreRequest(mr.arguments)
-            response = osr.score(store, mr)
-            ctx['has'] = osr.has
+            response = get_score(ctx, store, mr)
             code = OK
         elif mr.method == 'clients_interests':
-            cir = ClientsInterestsRequest(mr.arguments)
-            response = cir.interests(store)
-            ctx['nclients'] = cir.nclients
+            response = get_interests(ctx, store, mr)
             code = OK
     except field.FieldError as e:
         msg = 'FieldError: {!s}'.format(e)

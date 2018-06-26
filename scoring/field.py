@@ -5,23 +5,6 @@ import re
 import datetime
 
 
-class FieldError(Exception):
-    def __init__(self, field_name, error_msg):
-        self.field_name = field_name or 'unknown'
-        self.error_msg = error_msg or 'unknown'
-
-    def __str__(self):
-        return '{:s}: {:s}'.format(self.field_name, self.error_msg)
-
-
-class FieldHolderError(Exception):
-    def __init__(self, error_msg):
-        self.error_msg = error_msg or 'unknown'
-
-    def __str__(self):
-        return self.error_msg
-
-
 class Field(object):
     def __init__(self, required=False, nullable=False):
         self.field_name = None
@@ -29,20 +12,22 @@ class Field(object):
         self.nullable = nullable
 
     def __get__(self, instance, owner):
-        return instance.__dict__.get(self.field_name, None)
+        return instance.__dict__.get(self.field_name + '_converted', instance.__dict__.get(self.field_name, None))
 
     def __set__(self, instance, value):
-        (data, success) = self.convert(value)
-        if success and self.validate(data):
-            instance.__dict__[self.field_name] = data
-        else:
-            raise FieldError(self.field_name, 'invalid')
+        instance.__dict__[self.field_name] = value
+        instance.__dict__.pop(self.field_name + '_converted', 'None')
 
-    def convert(self, value):
-        return (value, True)
+    def format_err(self, msg):
+        return '{:s}: {:s}'.format(self.field_name, msg)
 
-    def validate(self, value):
-        return value is not None or self.nullable
+    def validate(self, instance):
+        error_msgs = []
+        if self.required and self.field_name not in instance.__dict__:
+            error_msgs.append(self.format_err('required field absent'))
+        if not self.nullable and getattr(instance, self.field_name) is None:
+            error_msgs.append(self.format_err('field must not be null'))
+        return error_msgs
 
 
 class FieldHolderMeta(type):
@@ -58,16 +43,14 @@ class FieldHolderMeta(type):
 class FieldHolderBase(object):
     def __init__(self, struct):
         for field_name, field_value in self.field_dict.items():
-            if field_value.required and field_name not in struct:
-                raise FieldError(field_name, 'required')
-            else:
-                setattr(self, field_name, struct.get(field_name, None))
-        (success, error_msg) = self.validate()
-        if not success:
-            raise FieldHolderError(error_msg)
+            if field_name in struct:
+                setattr(self, field_name, struct[field_name])
 
     def validate(self):
-        return (True, None)
+        error_msgs = []
+        for field_name, field_value in self.field_dict.items():
+            error_msgs.extend(field_value.validate(self))
+        return error_msgs
 
     def dump_fields(self):
         for field_name in self.field_dict:
@@ -79,13 +62,25 @@ class FieldHolder(FieldHolderBase, metaclass=FieldHolderMeta):
 
 
 class CharField(Field):
-    def validate(self, value):
-        return super().validate(value) and (value is None or isinstance(value, str))
+    def validate(self, instance):
+        error_msgs = super().validate(instance)
+        value = getattr(instance, self.field_name)
+        if value is None:
+            return error_msgs
+        if not isinstance(value, str):
+            error_msgs.append(self.format_err('field must be string'))
+        return error_msgs
 
 
 class ArgumentsField(Field):
-    def validate(self, value):
-        return super().validate(value) and (value is None or isinstance(value, dict))
+    def validate(self, instance):
+        error_msgs = super().validate(instance)
+        value = getattr(instance, self.field_name)
+        if value is None:
+            return error_msgs
+        if not isinstance(value, dict):
+            error_msgs.append(self.format_err('field must be object'))
+        return error_msgs
 
 
 VALIDATE_EMAIL_RE = re.compile("^.+\\@(\\[?)[a-zA-Z0-9\\-\\.]+\\.([a-zA-Z]{2,3}|[0-9]{1,3})(\\]?)$")
@@ -96,8 +91,14 @@ class EmailField(CharField):
     def is_valid_email(email):
         return len(email) > 7 and re.match(VALIDATE_EMAIL_RE, email) is not None
 
-    def validate(self, value):
-        return super().validate(value) and (value is None or isinstance(value, str) and self.is_valid_email(value))
+    def validate(self, instance):
+        error_msgs = super().validate(instance)
+        value = getattr(instance, self.field_name)
+        if value is None:
+            return error_msgs
+        if isinstance(value, str) and not self.is_valid_email(value):
+            error_msgs.append(self.format_err('field must be valid email address'))
+        return error_msgs
 
 
 VALIDATE_PHONE_RE = re.compile("^7\\d+$")
@@ -108,26 +109,38 @@ class PhoneField(Field):
     def is_valid_phone(phone):
         return len(phone) == 11 and re.match(VALIDATE_PHONE_RE, phone) is not None
 
-    def convert(self, value):
-        data = None
-        success = True
-        if value is not None:
-            data = str(value)
-            success = self.is_valid_phone(data)
-        return (data, success)
+    def validate(self, instance):
+        error_msgs = super().validate(instance)
+        value = getattr(instance, self.field_name)
+        if value is None:
+            return error_msgs
+        if not (isinstance(value, str) or isinstance(value, int)):
+            error_msgs.append(self.format_err('field must be string or number'))
+        else:
+            if isinstance(value, int):
+                value = str(value)
+                instance.__dict__[self.field_name + '_converted'] = value
+            if not self.is_valid_phone(value):
+                error_msgs.append(self.format_err('field must be valid phone (11 digits, leading digit = 7)'))
+        return error_msgs
 
 
-class DateField(Field):
-    def convert(self, value):
-        date = None
-        success = False
-        try:
-            if value is not None:
-                date = datetime.datetime.strptime(value, "%d.%m.%Y").date()
-            success = True
-        except ValueError:
-            pass
-        return date, success
+DATE_FIELD_FORMAT = "%d.%m.%Y"
+
+
+class DateField(CharField):
+    def validate(self, instance):
+        error_msgs = super().validate(instance)
+        value = getattr(instance, self.field_name)
+        if value is None:
+            return error_msgs
+        if isinstance(value, str):
+            try:
+                value = datetime.datetime.strptime(value, DATE_FIELD_FORMAT).date()
+                instance.__dict__[self.field_name + '_converted'] = value
+            except ValueError as e:
+                error_msgs.append(self.format_err('invalid date format ({!s})'.format(e)))
+        return error_msgs
 
 
 class BirthDayField(DateField):
@@ -139,24 +152,37 @@ class BirthDayField(DateField):
             years -= 1
         return years <= 70
 
-    def validate(self, value):
-        return super().validate(value) and (value is None or self.is_valid_birthday(value))
+    def validate(self, instance):
+        error_msgs = super().validate(instance)
+        value = getattr(instance, self.field_name)
+        if value is None:
+            return error_msgs
+        if isinstance(value, datetime.date) and not self.is_valid_birthday(value):
+            error_msgs.append(self.format_err('invalid birthday'))
+        return error_msgs
 
 
 class GenderField(Field):
-    def validate(self, value):
-        return super().validate(value) and (value is None or isinstance(value, int) and value in [0, 1, 2])
+    def validate(self, instance):
+        error_msgs = super().validate(instance)
+        value = getattr(instance, self.field_name)
+        if value is None:
+            return error_msgs
+        if not isinstance(value, int):
+            error_msgs.append(self.format_err('field must be number'))
+        elif value not in [0, 1, 2]:
+            error_msgs.append(self.format_err('field must be 0, 1 or 2'))
+        return error_msgs
 
 
 class ClientIDsField(Field):
-    @staticmethod
-    def is_number_list(lst):
-        if not isinstance(lst, list):
-            return False
-        for x in lst:
-            if not isinstance(x, int) or x < 0:
-                return False
-        return True
-
-    def validate(self, value):
-        return super().validate(value) and (value is None or self.is_number_list(value))
+    def validate(self, instance):
+        error_msgs = super().validate(instance)
+        value = getattr(instance, self.field_name)
+        if value is None:
+            return error_msgs
+        if not isinstance(value, list):
+            error_msgs.append(self.format_err('field must be list'))
+        elif not all(isinstance(x, int) for x in value):
+            error_msgs.append(self.format_err('field must be list of numbers'))
+        return error_msgs

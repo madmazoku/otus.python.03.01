@@ -42,6 +42,19 @@ class ClientsInterestsRequest(field.FieldHolder):
     client_ids = field.ClientIDsField(required=True)
     date = field.DateField(required=False, nullable=True)
 
+    @property
+    def nclients(self):
+        return len(self.client_ids)
+
+    def interests(self, store):
+        interests_dict = {}
+        for client_id in self.client_ids:
+            interests_dict[client_id] = scoring.get_interests(store, client_id)
+        return interests_dict
+
+    def validate(self):
+        return (len(self.client_ids) > 0, 'empty client list')
+
 
 class OnlineScoreRequest(field.FieldHolder):
     first_name = field.CharField(required=False, nullable=True)
@@ -50,6 +63,40 @@ class OnlineScoreRequest(field.FieldHolder):
     phone = field.PhoneField(required=False, nullable=True)
     birthday = field.BirthDayField(required=False, nullable=True)
     gender = field.GenderField(required=False, nullable=True)
+
+    @property
+    def has(self):
+        if not hasattr(self, '_has'):
+            has_dict = {}
+            for field_name in self.field_dict:
+                field_value = getattr(self, field_name)
+                if field_value is not None:
+                    has_dict[field_name] = field_value
+            self._has = has_dict
+        return self._has
+
+    def score(self, store, mr):
+        if mr.is_admin:
+            score = 42
+        else:
+            score = scoring.get_score(
+                store,
+                self.phone,
+                self.email,
+                birthday=self.birthday,
+                gender=self.gender,
+                first_name=self.first_name,
+                last_name=self.last_name)
+        return {'score': score}
+
+    def validate(self):
+        if self.phone is not None and self.email is not None:
+            return (True, None)
+        if self.first_name is not None and self.last_name is not None:
+            return (True, None)
+        if self.gender is not None and self.birthday is not None:
+            return (True, None)
+        return (False, 'Not enough arguments')
 
 
 class MethodRequest(field.FieldHolder):
@@ -66,37 +113,37 @@ class MethodRequest(field.FieldHolder):
 
 def check_auth(request):
     if request.is_admin:
-        digest = hashlib.sha512(datetime.datetime.now().strftime("%Y%m%d%H") + ADMIN_SALT).hexdigest()
+        hash_str = '{:s}{:s}'.format(datetime.datetime.now().strftime("%Y%m%d%H"), ADMIN_SALT)
     else:
-        digest = hashlib.sha512(request.account + request.login + SALT).hexdigest()
+        hash_str = '{:s}{:s}{:s}'.format(request.account, request.login, SALT)
+    digest = hashlib.sha512(hash_str.encode('utf-8')).hexdigest()
     if digest == request.token:
         return True
     return False
 
 
 def method_handler(request, ctx, store):
-    mr = MethodRequest(request['body'])
-
-    response, code = None, None
-
-    if not check_auth(mr):
-        code = FORBIDDEN
-    elif mr.method == 'online_score':
-        osr = OnlineScoreRequest(mr.arguments)
-        scoring.get_score(
-            store,
-            osr.phone,
-            osr.email,
-            birthday=osr.birthday,
-            gender=osr.gender,
-            first_name=osr.first_name,
-            last_name=osr.last_name)
-    elif mr.method == 'clients_interests':
-        cir = ClientsInterestsRequest(mr.arguments)
-        scoring.get_interests(store, cir.client_ids)
-    else:
-        code = INVALID_REQUEST
-
+    response, code = None, INVALID_REQUEST
+    try:
+        mr = MethodRequest(request['body'])
+        if not check_auth(mr):
+            code = FORBIDDEN
+        elif mr.method == 'online_score':
+            osr = OnlineScoreRequest(mr.arguments)
+            response = osr.score(store, mr)
+            ctx['has'] = osr.has
+            code = OK
+        elif mr.method == 'clients_interests':
+            cir = ClientsInterestsRequest(mr.arguments)
+            response = cir.interests(store)
+            ctx['nclients'] = cir.nclients
+            code = OK
+    except field.FieldError as e:
+        msg = 'FieldError: {!s}'.format(e)
+        response = msg
+    except field.FieldHolderError as e:
+        msg = 'FieldHolderError: {!s}'.format(e)
+        response = msg
     return response, code
 
 

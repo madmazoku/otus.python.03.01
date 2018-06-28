@@ -37,22 +37,26 @@ GENDERS = {
     FEMALE: "female",
 }
 
-METHOD_ROUTER = {}
-
 
 class ClientsInterestsRequest(field.FieldHolder):
     client_ids = field.ClientIDsField(required=True)
     date = field.DateField(required=False, nullable=True)
 
-    @property
     def nclients(self):
         return len(self.client_ids)
 
     def validate(self):
-        error_msg = super().validate()
-        if not error_msg and isinstance(self.client_ids, list) and not self.client_ids:
-            error_msg.append('empty client list')
-        return error_msg
+        super().validate()
+        if not self.client_ids:
+            raise ValueError('empty client ids list')
+
+    def get(self, ctx, store, method_request):
+        self.validate()
+        interests_dict = {}
+        for client_id in self.client_ids:
+            interests_dict[client_id] = scoring.get_interests(store, client_id)
+        ctx['nclients'] = self.nclients()
+        return interests_dict
 
 
 class OnlineScoreRequest(field.FieldHolder):
@@ -63,23 +67,39 @@ class OnlineScoreRequest(field.FieldHolder):
     birthday = field.BirthDayField(required=False, nullable=True)
     gender = field.GenderField(required=False, nullable=True)
 
-    @property
     def has(self):
-        if not hasattr(self, '_has'):
-            has_dict = {}
-            for field_name in self.field_dict:
-                field_value = getattr(self, field_name)
-                if field_value is not None:
-                    has_dict[field_name] = field_value
-            self._has = has_dict
-        return self._has
+        has_dict = {}
+        for field_name in self.field_dict:
+            field_value = getattr(self, field_name)
+            if field_value is not None:
+                has_dict[field_name] = field_value
+        return has_dict
 
     def validate(self):
-        error_msg = super().validate()
-        if not error_msg and (self.phone is None or self.email is None) and (
-                self.first_name is None or self.last_name is None) and (self.gender is None or self.birthday is None):
-            error_msg.append('not enough arguments')
-        return error_msg
+        super().validate()
+        no_phone_or_email = self.phone is None or self.email is None
+        no_first_or_last_name = self.first_name is None or self.last_name is None
+        no_gender_or_birthday = self.gender is None or self.birthday is None
+        if no_phone_or_email and no_first_or_last_name and no_gender_or_birthday:
+            msg = 'At least one of pairs must be set: '
+            msg += '(phone, email), (first_name, last_name), (gender, birthday)'
+            raise ValueError(msg)
+
+    def get(self, ctx, store, method_request):
+        self.validate()
+        if method_request.is_admin():
+            score = 42
+        else:
+            score = scoring.get_score(
+                store,
+                self.phone,
+                self.email,
+                birthday=self.birthday,
+                gender=self.gender,
+                first_name=self.first_name,
+                last_name=self.last_name)
+        ctx['has'] = self.has()
+        return {'score': score}
 
 
 class MethodRequest(field.FieldHolder):
@@ -89,13 +109,22 @@ class MethodRequest(field.FieldHolder):
     arguments = field.ArgumentsField(required=True, nullable=True)
     method = field.CharField(required=True, nullable=False)
 
-    @property
+    REQUEST_ROUTER = {'online_score': OnlineScoreRequest, 'clients_interests': ClientsInterestsRequest}
+
     def is_admin(self):
         return self.login == ADMIN_LOGIN
 
+    def get(self, ctx, store):
+        if self.method not in MethodRequest.REQUEST_ROUTER:
+            raise ValueError('Unknown method requested')
+        class_request = MethodRequest.REQUEST_ROUTER[self.method]
+        instance_request = class_request(self.arguments)
+        response = instance_request.get(ctx, store, self)
+        return response
+
 
 def check_auth(request):
-    if request.is_admin:
+    if request.is_admin():
         hash_str = '{:s}{:s}'.format(datetime.datetime.now().strftime("%Y%m%d%H"), ADMIN_SALT)
     else:
         hash_str = '{:s}{:s}{:s}'.format(request.account, request.login, SALT)
@@ -105,53 +134,18 @@ def check_auth(request):
     return False
 
 
-def get_score(ctx, store, method_request, online_score_request):
-    if method_request.is_admin:
-        score = 42
-    else:
-        score = scoring.get_score(
-            store,
-            online_score_request.phone,
-            online_score_request.email,
-            birthday=online_score_request.birthday,
-            gender=online_score_request.gender,
-            first_name=online_score_request.first_name,
-            last_name=online_score_request.last_name)
-    ctx['has'] = online_score_request.has
-    return {'score': score}
-
-
-def get_interests(ctx, store, method_request, clients_interests_request):
-    interests_dict = {}
-    for client_id in clients_interests_request.client_ids:
-        interests_dict[client_id] = scoring.get_interests(store, client_id)
-        ctx['nclients'] = clients_interests_request.nclients
-    return interests_dict
-
-
-METHOD_ROUTER['online_score'] = {
-    'object': OnlineScoreRequest,
-    'action': get_score,
-}
-METHOD_ROUTER['clients_interests'] = {'object': ClientsInterestsRequest, 'action': get_interests}
-
-
 def method_handler(request, ctx, store):
     response, code = None, INVALID_REQUEST
     method_request = MethodRequest(request['body'])
-    error_msg = method_request.validate()
-    if not error_msg:
-        if not check_auth(method_request):
+    try:
+        method_request.validate()
+        if check_auth(method_request):
+            response = method_request.get(ctx, store)
+            code = OK
+        else:
             code = FORBIDDEN
-        elif method_request.method in METHOD_ROUTER:
-            method = METHOD_ROUTER[method_request.method]
-            object_request = method['object'](method_request.arguments)
-            error_msg.extend(object_request.validate())
-            if not error_msg:
-                response = method['action'](ctx, store, method_request, object_request)
-                code = OK
-    if error_msg:
-        response = '; '.join(error_msg)
+    except ValueError as e:
+        response = str(e)
     return response, code
 
 

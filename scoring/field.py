@@ -18,27 +18,23 @@ class Field(object):
         instance.__dict__[self.field_name + '_orig'] = value
         instance.__dict__.pop(self.field_name, 'None')
 
-    def format_err(self, msg):
-        return '{:s}: {:s}'.format(self.field_name, msg)
-
     def validate(self, instance):
         error_msgs = []
         value = None
         if self.field_name + '_orig' in instance.__dict__:
             value = instance.__dict__[self.field_name + '_orig']
         elif self.required:
-            error_msgs.append(self.format_err('required field absent'))
+            raise ValueError('required field absent')
         if value is not None:
-            value_converted = self.validate_convert_value(error_msgs, instance, value)
-            if not error_msgs:
-                instance.__dict__[self.field_name] = value_converted
+            value_converted = self.validate_convert_value(instance, value)
+            instance.__dict__[self.field_name] = value_converted
         elif not self.nullable:
-            error_msgs.append(self.format_err('field must not be null'))
+            raise ValueError('field must not be null')
         else:
             instance.__dict__[self.field_name] = None
         return error_msgs
 
-    def validate_convert_value(self, error_msgs, instance, value):
+    def validate_convert_value(self, instance, value):
         return value
 
 
@@ -61,8 +57,12 @@ class FieldHolderBase(object):
     def validate(self):
         error_msgs = []
         for field_name, field_value in self.field_dict.items():
-            error_msgs.extend(field_value.validate(self))
-        return error_msgs
+            try:
+                field_value.validate(self)
+            except ValueError as e:
+                error_msgs.append('{:s}: {!s}'.format(field_name, e))
+        if error_msgs:
+            raise ValueError('; '.join(error_msgs))
 
     def dump_fields(self):
         for field_name in self.field_dict:
@@ -74,18 +74,18 @@ class FieldHolder(FieldHolderBase, metaclass=FieldHolderMeta):
 
 
 class CharField(Field):
-    def validate_convert_value(self, error_msgs, instance, value):
-        value = super().validate_convert_value(error_msgs, instance, value)
-        if not error_msgs and not isinstance(value, str):
-            error_msgs.append(self.format_err('field must be string'))
+    def validate_convert_value(self, instance, value):
+        value = super().validate_convert_value(instance, value)
+        if not isinstance(value, str):
+            raise ValueError('field must be string')
         return value
 
 
 class ArgumentsField(Field):
-    def validate_convert_value(self, error_msgs, instance, value):
-        value = super().validate_convert_value(error_msgs, instance, value)
-        if not error_msgs and not isinstance(value, dict):
-            error_msgs.append(self.format_err('field must be object'))
+    def validate_convert_value(self, instance, value):
+        value = super().validate_convert_value(instance, value)
+        if not isinstance(value, dict):
+            raise ValueError('field must be object')
         return value
 
 
@@ -96,10 +96,10 @@ class EmailField(CharField):
     def is_valid_email(email):
         return len(email) > 7 and re.match(EmailField.VALIDATE_EMAIL_RE, email) is not None
 
-    def validate_convert_value(self, error_msgs, instance, value):
-        value = super().validate_convert_value(error_msgs, instance, value)
-        if not error_msgs and not EmailField.is_valid_email(value):
-            error_msgs.append(self.format_err('field must be valid email address'))
+    def validate_convert_value(self, instance, value):
+        value = super().validate_convert_value(instance, value)
+        if not EmailField.is_valid_email(value):
+            raise ValueError('field must be valid email address, xxx@yyy.zzz')
         return value
 
 
@@ -110,29 +110,24 @@ class PhoneField(Field):
     def is_valid_phone(phone):
         return len(phone) == 11 and re.match(PhoneField.VALIDATE_PHONE_RE, phone) is not None
 
-    def validate_convert_value(self, error_msgs, instance, value):
-        value = super().validate_convert_value(error_msgs, instance, value)
-        if not error_msgs:
-            if not isinstance(value, str) and not isinstance(value, int):
-                error_msgs.append(self.format_err('field must be string or number'))
-            else:
-                if isinstance(value, int):
-                    value = str(value)
-                if not PhoneField.is_valid_phone(value):
-                    error_msgs.append(self.format_err('field must be valid phone (11 digits, leading digit = 7)'))
+    def validate_convert_value(self, instance, value):
+        value = super().validate_convert_value(instance, value)
+        if not isinstance(value, str) and not isinstance(value, int):
+            raise ValueError('field must be string or number')
+        else:
+            if isinstance(value, int):
+                value = str(value)
+            if not PhoneField.is_valid_phone(value):
+                raise ValueError('field must be valid phone, 11 digits, leading digit = 7')
         return value
 
 
 class DateField(CharField):
     DATE_FIELD_FORMAT = "%d.%m.%Y"
 
-    def validate_convert_value(self, error_msgs, instance, value):
-        value = super().validate_convert_value(error_msgs, instance, value)
-        if not error_msgs:
-            try:
-                value = datetime.datetime.strptime(value, DateField.DATE_FIELD_FORMAT).date()
-            except ValueError as e:
-                error_msgs.append(self.format_err('invalid date format ({!s})'.format(e)))
+    def validate_convert_value(self, instance, value):
+        value = super().validate_convert_value(instance, value)
+        value = datetime.datetime.strptime(value, DateField.DATE_FIELD_FORMAT).date()
         return value
 
 
@@ -145,30 +140,28 @@ class BirthDayField(DateField):
             years -= 1
         return years <= 70
 
-    def validate_convert_value(self, error_msgs, instance, value):
-        value = super().validate_convert_value(error_msgs, instance, value)
-        if not error_msgs and not BirthDayField.is_valid_birthday(value):
-            error_msgs.append(self.format_err('invalid birthday'))
+    def validate_convert_value(self, instance, value):
+        value = super().validate_convert_value(instance, value)
+        if not BirthDayField.is_valid_birthday(value):
+            raise ValueError('invalid birthday, not more then 70 years excepted')
         return value
 
 
 class GenderField(Field):
-    def validate_convert_value(self, error_msgs, instance, value):
-        value = super().validate_convert_value(error_msgs, instance, value)
-        if not error_msgs:
-            if not isinstance(value, int):
-                error_msgs.append(self.format_err('field must be number'))
-            elif value not in [0, 1, 2]:
-                error_msgs.append(self.format_err('field must be 0, 1 or 2'))
+    def validate_convert_value(self, instance, value):
+        value = super().validate_convert_value(instance, value)
+        if not isinstance(value, int):
+            raise ValueError('field must be number')
+        elif value not in [0, 1, 2]:
+            raise ValueError('field must be 0, 1 or 2')
         return value
 
 
 class ClientIDsField(Field):
-    def validate_convert_value(self, error_msgs, instance, value):
-        value = super().validate_convert_value(error_msgs, instance, value)
-        if not error_msgs:
-            if not isinstance(value, list):
-                error_msgs.append(self.format_err('field must be list'))
-            elif not all(isinstance(x, int) for x in value):
-                error_msgs.append(self.format_err('field must be list of numbers'))
+    def validate_convert_value(self, instance, value):
+        value = super().validate_convert_value(instance, value)
+        if not isinstance(value, list):
+            raise ValueError('field must be list')
+        elif not all(isinstance(x, int) for x in value):
+            raise ValueError('field must be list of numbers')
         return value

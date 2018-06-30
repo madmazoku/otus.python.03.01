@@ -56,7 +56,7 @@ class ClientsInterestsRequest(field.FieldHolder):
         for client_id in self.client_ids:
             interests_dict[client_id] = scoring.get_interests(store, client_id)
         ctx['nclients'] = self.nclients()
-        return interests_dict
+        return interests_dict, OK
 
 
 class OnlineScoreRequest(field.FieldHolder):
@@ -99,7 +99,7 @@ class OnlineScoreRequest(field.FieldHolder):
                 first_name=self.first_name,
                 last_name=self.last_name)
         ctx['has'] = self.has()
-        return {'score': score}
+        return {'score': score}, OK
 
 
 class MethodRequest(field.FieldHolder):
@@ -114,13 +114,10 @@ class MethodRequest(field.FieldHolder):
     def is_admin(self):
         return self.login == ADMIN_LOGIN
 
-    def get(self, ctx, store):
+    def validate(self):
+        super().validate()
         if self.method not in MethodRequest.REQUEST_ROUTER:
             raise ValueError('Unknown method requested')
-        class_request = MethodRequest.REQUEST_ROUTER[self.method]
-        instance_request = class_request(self.arguments)
-        response = instance_request.get(ctx, store, self)
-        return response
 
 
 def check_auth(request):
@@ -135,17 +132,18 @@ def check_auth(request):
 
 
 def method_handler(request, ctx, store):
-    response, code = None, INVALID_REQUEST
+    response, code = None, None
     method_request = MethodRequest(request['body'])
     try:
         method_request.validate()
         if check_auth(method_request):
-            response = method_request.get(ctx, store)
-            code = OK
+            class_request = MethodRequest.REQUEST_ROUTER[method_request.method]
+            instance_request = class_request(method_request.arguments)
+            response, code = instance_request.get(ctx, store, method_request)
         else:
-            code = FORBIDDEN
+            response, code = "Invalid token", FORBIDDEN
     except ValueError as e:
-        response = str(e)
+        response, code = str(e), INVALID_REQUEST
     return response, code
 
 

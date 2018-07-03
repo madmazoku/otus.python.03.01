@@ -6,67 +6,77 @@ import datetime
 
 
 class Field(object):
-    def __init__(self, required=False, nullable=False):
-        self.field_name = None
+    def __init__(self, required=False, nullable=False, field_name=None):
+        self.field_name = field_name
         self.required = required
         self.nullable = nullable
 
-    def __get__(self, instance, owner):
-        return instance.__dict__[self.field_name]
-
-    def __set__(self, instance, value):
-        instance.__dict__[self.field_name + '_orig'] = value
-        instance.__dict__.pop(self.field_name, 'None')
-
-    def validate(self, instance):
-        error_msgs = []
+    def validate(self, struct):
         value = None
-        if self.field_name + '_orig' in instance.__dict__:
-            value = instance.__dict__[self.field_name + '_orig']
+        if self.field_name in struct:
+            value = struct[self.field_name]
         elif self.required:
             raise ValueError('required field absent')
+        value_converted = None
         if value is not None:
-            value_converted = self.validate_convert_value(instance, value)
-            instance.__dict__[self.field_name] = value_converted
+            value_converted = self.validate_convert_value(value)
         elif not self.nullable:
             raise ValueError('field must not be null')
-        else:
-            instance.__dict__[self.field_name] = None
-        return error_msgs
+        return value_converted
 
-    def validate_convert_value(self, instance, value):
+    def validate_convert_value(self, value):
         return value
 
 
 class FieldHolderMeta(type):
     def __new__(cls, name, bases, attrs):
-        attrs['field_dict'] = {}
+        field_dict = {}
+        for base in bases:
+            if hasattr(base, 'field_dict'):
+                field_dict.update(getattr(base, 'field_dict'))
+        new_field_dict = {}
         for attr_name, attr_value in attrs.items():
             if isinstance(attr_value, Field):
+                if attr_name in field_dict:
+                    raise Exception('Field redefined in {:s}'.format(name))
                 attr_value.field_name = attr_name
-                attrs['field_dict'][attr_name] = attr_value
+                new_field_dict[attr_name] = attr_value
+        for attr_name in new_field_dict:
+            del attrs[attr_name]
+        field_dict.update(new_field_dict)
+        attrs['field_dict'] = field_dict
         return super().__new__(cls, name, bases, attrs)
 
 
 class FieldHolderBase(object):
     def __init__(self, struct):
-        for field_name, field_value in self.field_dict.items():
-            if field_name in struct:
-                setattr(self, field_name, struct[field_name])
+        self.struct_orig = struct
 
     def validate(self):
         error_msgs = []
+        struct = {}
         for field_name, field_value in self.field_dict.items():
             try:
-                field_value.validate(self)
+                struct[field_name] = field_value.validate(self.struct_orig)
             except ValueError as e:
                 error_msgs.append('{:s}: {!s}'.format(field_name, e))
         if error_msgs:
             raise ValueError('; '.join(error_msgs))
+        self.struct = struct
+        for field_name, field_value in struct.items():
+            self.__dict__[field_name] = struct[field_name]
 
     def dump_fields(self):
+        print("Dump: {!s}".format(self))
         for field_name in self.field_dict:
-            print("{!s}: {!s} ({!s})".format(field_name, getattr(self, field_name), type(getattr(self, field_name))))
+            values = []
+            if hasattr(self, "struct") and field_name in self.struct:
+                value = self.struct[field_name]
+                values.append("\t\tvalid: {!s} ({!s})".format(value, type(value)))
+            if field_name in self.struct_orig:
+                value = self.struct_orig[field_name]
+                values.append("\t\torig: {!s} ({!s})".format(value, type(value)))
+            print("\t{:s}:\n{:s}".format(field_name, "\n".join(values) if values else "\t\tabsent"))
 
 
 class FieldHolder(FieldHolderBase, metaclass=FieldHolderMeta):
@@ -74,16 +84,16 @@ class FieldHolder(FieldHolderBase, metaclass=FieldHolderMeta):
 
 
 class CharField(Field):
-    def validate_convert_value(self, instance, value):
-        value = super().validate_convert_value(instance, value)
+    def validate_convert_value(self, value):
+        value = super().validate_convert_value(value)
         if not isinstance(value, str):
             raise ValueError('field must be string')
         return value
 
 
 class ArgumentsField(Field):
-    def validate_convert_value(self, instance, value):
-        value = super().validate_convert_value(instance, value)
+    def validate_convert_value(self, value):
+        value = super().validate_convert_value(value)
         if not isinstance(value, dict):
             raise ValueError('field must be object')
         return value
@@ -96,8 +106,8 @@ class EmailField(CharField):
     def is_valid_email(email):
         return len(email) > 7 and re.match(EmailField.VALIDATE_EMAIL_RE, email) is not None
 
-    def validate_convert_value(self, instance, value):
-        value = super().validate_convert_value(instance, value)
+    def validate_convert_value(self, value):
+        value = super().validate_convert_value(value)
         if not EmailField.is_valid_email(value):
             raise ValueError('field must be valid email address, xxx@yyy.zzz')
         return value
@@ -110,8 +120,8 @@ class PhoneField(Field):
     def is_valid_phone(phone):
         return len(phone) == 11 and re.match(PhoneField.VALIDATE_PHONE_RE, phone) is not None
 
-    def validate_convert_value(self, instance, value):
-        value = super().validate_convert_value(instance, value)
+    def validate_convert_value(self, value):
+        value = super().validate_convert_value(value)
         if not isinstance(value, str) and not isinstance(value, int):
             raise ValueError('field must be string or number')
         else:
@@ -125,8 +135,8 @@ class PhoneField(Field):
 class DateField(CharField):
     DATE_FIELD_FORMAT = "%d.%m.%Y"
 
-    def validate_convert_value(self, instance, value):
-        value = super().validate_convert_value(instance, value)
+    def validate_convert_value(self, value):
+        value = super().validate_convert_value(value)
         value = datetime.datetime.strptime(value, DateField.DATE_FIELD_FORMAT).date()
         return value
 
@@ -140,16 +150,16 @@ class BirthDayField(DateField):
             years -= 1
         return years <= 70
 
-    def validate_convert_value(self, instance, value):
-        value = super().validate_convert_value(instance, value)
+    def validate_convert_value(self, value):
+        value = super().validate_convert_value(value)
         if not BirthDayField.is_valid_birthday(value):
             raise ValueError('invalid birthday, not more then 70 years excepted')
         return value
 
 
 class GenderField(Field):
-    def validate_convert_value(self, instance, value):
-        value = super().validate_convert_value(instance, value)
+    def validate_convert_value(self, value):
+        value = super().validate_convert_value(value)
         if not isinstance(value, int):
             raise ValueError('field must be number')
         elif value not in [0, 1, 2]:
@@ -158,10 +168,50 @@ class GenderField(Field):
 
 
 class ClientIDsField(Field):
-    def validate_convert_value(self, instance, value):
-        value = super().validate_convert_value(instance, value)
+    def validate_convert_value(self, value):
+        value = super().validate_convert_value(value)
         if not isinstance(value, list):
             raise ValueError('field must be list')
         elif not all(isinstance(x, int) for x in value):
             raise ValueError('field must be list of numbers')
         return value
+
+
+if __name__ == "__main__":
+
+    class Test(FieldHolder):
+        char = CharField(required=True, nullable=False)
+        args = ArgumentsField(required=True, nullable=False)
+        email = EmailField(required=True, nullable=False)
+        phone = PhoneField(required=True, nullable=False)
+        date = DateField(required=True, nullable=False)
+        bday = BirthDayField(required=True, nullable=False)
+        sex = GenderField(required=True, nullable=False)
+        cids = ClientIDsField(required=True, nullable=False)
+
+    class Test2(Test):
+        pass
+
+    st = {
+        'char': '123',
+        'args': {},
+        'email': 'xxx@yyy.zzz',
+        'phone': 71234567890,
+        'date': '01.01.2018',
+        'bday': '01.01.1970',
+        'sex': 1,
+        'cids': [1, 2, 3]
+    }
+    print("~~~~~")
+    t = Test2(st)
+    print("~~~~~")
+    print(dir(t))
+    print("~~~~~")
+    t.validate()
+    print("~~~~~")
+    print(t)
+    print("~~~~~")
+    t.dump_fields()
+    print("~~~~~")
+    print(t.email)
+    print(t.date)

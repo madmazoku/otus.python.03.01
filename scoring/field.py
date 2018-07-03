@@ -63,8 +63,8 @@ class FieldHolderBase(object):
         if error_msgs:
             raise ValueError('; '.join(error_msgs))
         self.struct = struct
-        for field_name, field_value in struct.items():
-            self.__dict__[field_name] = struct[field_name]
+        for field_name, value in struct.items():
+            setattr(self, field_name, value)
 
     def dump_fields(self):
         print("Dump: {!s}".format(self))

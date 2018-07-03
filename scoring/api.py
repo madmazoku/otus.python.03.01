@@ -137,7 +137,7 @@ def method_handler(request, ctx, store):
     try:
         method_request.validate()
         if check_auth(method_request):
-            class_request = MethodRequest.REQUEST_ROUTER[method_request.method]
+            class_request = method_request.REQUEST_ROUTER[method_request.method]
             instance_request = class_request(method_request.arguments)
             response, code = instance_request.get(ctx, store, method_request)
         else:

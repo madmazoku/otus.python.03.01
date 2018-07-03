@@ -109,14 +109,14 @@ class MethodRequest(field.FieldHolder):
     arguments = field.ArgumentsField(required=True, nullable=True)
     method = field.CharField(required=True, nullable=False)
 
-    REQUEST_ROUTER = {'online_score': OnlineScoreRequest, 'clients_interests': ClientsInterestsRequest}
+    request_router = {'online_score': OnlineScoreRequest, 'clients_interests': ClientsInterestsRequest}
 
     def is_admin(self):
         return self.login == ADMIN_LOGIN
 
     def validate(self):
         super().validate()
-        if self.method not in self.REQUEST_ROUTER:
+        if self.method not in self.request_router:
             raise ValueError('Unknown method requested')
 
 
@@ -137,7 +137,7 @@ def method_handler(request, ctx, store):
     try:
         method_request.validate()
         if check_auth(method_request):
-            class_request = method_request.REQUEST_ROUTER[method_request.method]
+            class_request = method_request.request_router[method_request.method]
             instance_request = class_request(method_request.arguments)
             response, code = instance_request.get(ctx, store, method_request)
         else:

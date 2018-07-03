@@ -116,7 +116,7 @@ class MethodRequest(field.FieldHolder):
 
     def validate(self):
         super().validate()
-        if self.method not in MethodRequest.REQUEST_ROUTER:
+        if self.method not in self.REQUEST_ROUTER:
             raise ValueError('Unknown method requested')
 
 

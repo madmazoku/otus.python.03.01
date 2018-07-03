@@ -9,14 +9,6 @@ import unittest
 import api
 
 
-def skip(f):
-    @functools.wraps(f)
-    def skip_wrapper(*args):
-        print('\nSkip test: {!s}'.format(f))
-
-    return skip_wrapper
-
-
 def cases(cases):
     def decorator(f):
         @functools.wraps(f)

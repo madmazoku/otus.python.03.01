@@ -103,6 +103,7 @@ def check_auth(request):
 def clients_interests_handler(ctx, store, method_request):
     clients_interests_request = ClientsInterestsRequest(method_request.arguments)
     clients_interests_request.validate()
+
     interests_dict = {}
     for client_id in clients_interests_request.client_ids:
         interests_dict[client_id] = scoring.get_interests(store, client_id)

@@ -50,14 +50,6 @@ class ClientsInterestsRequest(field.FieldHolder):
         if not self.client_ids:
             raise ValueError('empty client ids list')
 
-    def get(self, ctx, store, method_request):
-        self.validate()
-        interests_dict = {}
-        for client_id in self.client_ids:
-            interests_dict[client_id] = scoring.get_interests(store, client_id)
-        ctx['nclients'] = self.nclients()
-        return interests_dict, OK
-
 
 class OnlineScoreRequest(field.FieldHolder):
     first_name = field.CharField(required=False, nullable=True)
@@ -85,22 +77,6 @@ class OnlineScoreRequest(field.FieldHolder):
             msg += '(phone, email), (first_name, last_name), (gender, birthday)'
             raise ValueError(msg)
 
-    def get(self, ctx, store, method_request):
-        self.validate()
-        if method_request.is_admin():
-            score = 42
-        else:
-            score = scoring.get_score(
-                store,
-                self.phone,
-                self.email,
-                birthday=self.birthday,
-                gender=self.gender,
-                first_name=self.first_name,
-                last_name=self.last_name)
-        ctx['has'] = self.has()
-        return {'score': score}, OK
-
 
 class MethodRequest(field.FieldHolder):
     account = field.CharField(required=False, nullable=True)
@@ -109,15 +85,8 @@ class MethodRequest(field.FieldHolder):
     arguments = field.ArgumentsField(required=True, nullable=True)
     method = field.CharField(required=True, nullable=False)
 
-    request_router = {'online_score': OnlineScoreRequest, 'clients_interests': ClientsInterestsRequest}
-
     def is_admin(self):
         return self.login == ADMIN_LOGIN
-
-    def validate(self):
-        super().validate()
-        if self.method not in self.request_router:
-            raise ValueError('Unknown method requested')
 
 
 def check_auth(request):
@@ -131,15 +100,48 @@ def check_auth(request):
     return False
 
 
+def clients_interests_handler(ctx, store, method_request):
+    clients_interests_request = ClientsInterestsRequest(method_request.arguments)
+    clients_interests_request.validate()
+    interests_dict = {}
+    for client_id in clients_interests_request.client_ids:
+        interests_dict[client_id] = scoring.get_interests(store, client_id)
+    ctx['nclients'] = clients_interests_request.nclients()
+    return interests_dict, OK
+
+
+def online_score_handler(ctx, store, method_request):
+    online_score_request = OnlineScoreRequest(method_request.arguments)
+    online_score_request.validate()
+
+    if method_request.is_admin():
+        score = 42
+    else:
+        score = scoring.get_score(
+            store,
+            online_score_request.phone,
+            online_score_request.email,
+            birthday=online_score_request.birthday,
+            gender=online_score_request.gender,
+            first_name=online_score_request.first_name,
+            last_name=online_score_request.last_name)
+    ctx['has'] = online_score_request.has()
+    return {'score': score}, OK
+
+
 def method_handler(request, ctx, store):
+    router = {'online_score': online_score_handler, 'clients_interests': clients_interests_handler}
     response, code = None, None
+
     method_request = MethodRequest(request['body'])
     try:
         method_request.validate()
         if check_auth(method_request):
-            class_request = method_request.request_router[method_request.method]
-            instance_request = class_request(method_request.arguments)
-            response, code = instance_request.get(ctx, store, method_request)
+            if method_request.method in router:
+                handler = router[method_request.method]
+                response, code = handler(ctx, store, method_request)
+            else:
+                raise ValueError('unknown method')
         else:
             response, code = "Invalid token", FORBIDDEN
     except ValueError as e:

@@ -152,10 +152,24 @@ def method_handler(request, ctx, store):
 
 class MainHTTPHandler(BaseHTTPRequestHandler):
     router = {"method": method_handler}
-    store = None
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.store = Non
 
     def get_request_id(self, headers):
         return headers.get('HTTP_X_REQUEST_ID', uuid.uuid4().hex)
+
+    def do_GET(self):
+        code = NOT_FOUND
+        context = {"request_id": self.get_request_id(self.headers)}
+
+        path = self.path.strip("/")
+        if path == 'ping':
+            code = OK
+
+        self.make_response(None, code, context)
+        return
 
     def do_POST(self):
         response, code = {}, OK
@@ -180,6 +194,10 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
             else:
                 code = NOT_FOUND
 
+        self.make_response(response, code, context)
+        return
+
+    def make_response(self, response, code, context):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
@@ -189,8 +207,11 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
             r = {"error": response or ERRORS.get(code, "Unknown Error"), "code": code}
         context.update(r)
         logging.info(context)
-        self.wfile.write(json.dumps(r))
+        self.wfile.write(json.dumps(r).encode("utf-8"))
         return
+
+    def log_message(self, format, *args):
+        logging.info('HTTP: ' + format, *args)
 
 
 if __name__ == "__main__":

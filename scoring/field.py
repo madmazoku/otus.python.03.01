@@ -175,4 +175,3 @@ class ClientIDsField(Field):
         elif not all(isinstance(x, int) for x in value):
             raise ValueError('field must be list of numbers')
         return value
-

@@ -152,27 +152,26 @@ def method_handler(request, ctx, store):
 
 class MainHTTPHandler(BaseHTTPRequestHandler):
     router = {"method": method_handler}
-
-    def __init__(self, *args):
-        super().__init__(*args)
-        self.store = Non
+    store = None
 
     def get_request_id(self, headers):
         return headers.get('HTTP_X_REQUEST_ID', uuid.uuid4().hex)
 
     def do_GET(self):
-        code = NOT_FOUND
+        code = INVALID_REQUEST
         context = {"request_id": self.get_request_id(self.headers)}
 
         path = self.path.strip("/")
         if path == 'ping':
             code = OK
+        else:
+            code = NOT_FOUND
 
         self.make_response(None, code, context)
         return
 
     def do_POST(self):
-        response, code = {}, OK
+        response, code = {}, INVALID_REQUEST
         context = {"request_id": self.get_request_id(self.headers)}
         request = None
         data_string = None
